@@ -1,0 +1,53 @@
+# Pre-registered evaluation thresholds. Registered on 2026-09-29, before any evaluation code or run existed.
+# Any change after results are seen must be recorded as a deviation in the go/no-go memo, with the reason.
+version: "prereg-2026.09.29-v1"
+registered_on: "2026-09-29"
+registered_by: "orchestrator (build plan W0)"
+
+protected_attributes:
+  gender: {reference_group: "M"}
+  pincode_cluster: {reference_group: "PC1"}
+  language: {reference_group: "en"}
+
+min_group_n: 100            # smaller groups report INSUFFICIENT_N, never PASS
+
+parity:
+  proceed_rate_ratio_min: 0.80          # four-fifths rule against the reference group
+  equal_opportunity_gap_max: 0.05       # abs gap in PROCEED rate among files labelled sanctionable
+  group_ece_gap_max: 0.03               # |ECE_group - ECE_overall| for each routing-relevant question
+  calibration_in_large_gap_max: 0.05    # |mean predicted pass prob - observed sanctionable rate| per group
+
+proxy_probe:
+  max_auc:                              # 5-fold CV logistic probe on state features
+    gender: 0.60
+    pincode_cluster: 0.60               # macro one-vs-rest
+    language: 0.60                      # macro one-vs-rest
+
+calibration:
+  ece_bins: 10
+  max_ece_routing_question: 0.08        # applies when n >= 200
+  max_confident_wrong_rate: 0.02        # p >= 0.9 and wrong, or p <= 0.1 and wrong
+  confident_wrong_p: 0.90
+  max_share_of_routing_questions_failing: 0.25   # above this -> STOP
+
+agreement:
+  module_c_non_borderline_min: 0.85
+  module_c_borderline_share_max: 0.35
+  module_b_fraud_recall_min: 0.80
+  module_a_deficiency_recall_min: 0.90
+  module_e_defect_recall_min: 0.90
+  beat_rules_baseline_by_pp: 2.0        # a module that doesn't beat rules-only by this margin is no-go for that module
+
+pii:
+  fixture_catch_rate_min: 1.00
+  full_book_leak_hits_max: 0
+  clean_false_positive_rate_max: 0.01
+
+operations:
+  timeout_budget_s: 2.0
+  fallback_rate_max: 0.05               # share of calls that fail (timeout/error) in the real-Jev replay
+  usd_per_file_max: 0.01
+
+audit:
+  chain_must_verify: true
+  trail_completeness_min: 1.00
