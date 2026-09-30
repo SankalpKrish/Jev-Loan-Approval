@@ -1,0 +1,47 @@
+# Pricing formula (RBI constraint (e): every rate must be traceable line by line). Read by policy.pricing.price().
+#   rate = benchmark + segment spread + risk premium(band, composite) + bureau adjustment, clamped to [floor, cap]
+# The model never sets price: the only model-derived inputs are the C band and the composite, both via the policy engine.
+# Only PROCEED files ("pass") and human-approved borderline files ("borderline_approved_by_human") can be priced.
+version: "pricing-2026.09-v1"
+
+benchmark_rate_pct: 8.75          # external benchmark lending rate (EBLR)
+
+segment_spread_pct:
+  salaried_personal: 3.0
+  self_employed: 3.75
+  msme_business: 3.0
+  secured_home: 0.25
+
+# Per band, tiers checked from the top: the first with composite >= composite_at_least applies.
+risk_premium_pct_by_band:
+  pass:
+    - {composite_at_least: 0.85, premium_pct: 0.0}
+    - {composite_at_least: 0.70, premium_pct: 0.5}
+  borderline_approved_by_human:
+    - {composite_at_least: 0.0, premium_pct: 1.25}
+
+# By the state's bureau score band; any band not listed pays the default.
+bureau_adjustment_pct:
+  "800+": -0.25
+  "750-799": 0.0
+  "700-749": 0.25
+  "650-699": 0.5
+  "NTC": 0.75
+bureau_adjustment_default_pct: 1.0
+
+floor_pct:
+  salaried_personal: 10.5
+  self_employed: 11.0
+  msme_business: 10.0
+  secured_home: 8.5
+cap_pct:
+  salaried_personal: 16.0
+  self_employed: 17.0
+  msme_business: 16.0
+  secured_home: 11.5
+
+processing_fee_pct:
+  salaried_personal: 1.5
+  self_employed: 1.5
+  msme_business: 1.0
+  secured_home: 0.5

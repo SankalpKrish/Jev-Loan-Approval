@@ -16,6 +16,7 @@ real one. Labels always use the real one, which is what makes that disparity lab
 
 from __future__ import annotations
 
+import bisect
 import math
 import random
 from datetime import date
@@ -47,6 +48,22 @@ NTC_MIN_MONTHLY_INCOME = 50_000
 MIN_BUSINESS_VINTAGE_YEARS = 2.0
 RETIREMENT_AGE = {"salaried": 60, "self_employed": 70, "business_owner": 70}
 STATEMENTS_REQUIRED = {"salaried_personal": 6, "secured_home": 6, "self_employed": 12, "msme_business": 12}
+
+# ------------------------------------------------------------------------------------------------ truth-alignment edges
+# PLAN 3.8, truth-alignment rule: every per-question truth is a function of what the state shows, with thresholds on
+# band edges. The edges below MUST match the band tables in ``jevloan.state.base`` (BAND_TABLES: "foir_headroom_pts",
+# "ltv_headroom_pts", "dscr", "volatility", "valuation_spread"). The data layer does not import from ``state/``, so they
+# are repeated here once, by name; tests/test_data_risk.py compares them to the state tables and rebuilds the truths
+# from real states. Every band is left closed, [lo, hi), and values are rounded to ``BAND_ROUND`` places first, as
+# state.base does, so no float fuzz decides a tie.
+BAND_ROUND = 6
+FOIR_HEADROOM_EDGES = (-10.0, 0.0, 10.0, 20.0)  # segment FOIR limit minus FOIR, points: <-10, -10-0, 0-10, 10-20, >=20
+LTV_HEADROOM_EDGES = (-5.0, 0.0, 8.0, 15.0)  # LTV limit minus LTV, points: <-5, -5-0, 0-8, 8-15, >=15
+DSCR_EDGES = (1.0, 1.25, 1.5, 2.0)  # <1, 1-1.25, 1.25-1.5, 1.5-2, >2 (2.0 itself is in the top band)
+VOLATILITY_STABLE_CV = 0.25  # cv below this is band "low": the C_income_stable threshold
+VOLATILITY_HIGH_CV = 0.35  # cv at or above this is band "high": costs C_capacity one level
+VALUATION_SPREAD_HIGH = 0.20  # spread at or above this is band ">20%": costs C_collateral_adequacy one level
+BALANCE_STRESS_LAST_OVER_FIRST = (6, 10)  # last-two-month mean <= 6/10 x first-two-month mean (>= 40% below)
 
 # ------------------------------------------------------------------------------------------------ the risk function
 
@@ -335,22 +352,25 @@ def draw_outcome(pd: float, rng: random.Random) -> str:
 def ews_truth(months: list[RepaymentMonth]) -> dict[str, bool]:
     """Early-warning truths from six months of repayment.
 
-    * F_ews_dpd_rising: DPD strictly higher than the previous month in at least 3 of months 3-6, or any month
-      at 30 or more.
+    * F_ews_dpd_rising: DPD (the state's ``dpd_days``) strictly higher than the previous month in at least 3 of
+      months 3-6, or any month at 30 or more.
     * F_ews_emi_bounces: 2 or more bounced EMIs.
     * F_ews_partial_payments: 2 or more partial payments.
-    * F_ews_balance_stress: mean balance of months 5-6 at least 40 percent below the mean of months 1-2.
+    * F_ews_balance_stress: the mean balance of months 5-6 is at most 0.6 times the mean of months 1-2 (at least 40
+      percent below), compared on integer sums so a tie is exact. This is exactly the state's
+      ``loan.balance_change_band == "falling_40_plus"``.
     """
     by_m = sorted(months, key=lambda r: r.m)
     dpd = [r.dpd for r in by_m]
     rises = sum(1 for i in range(2, 6) if dpd[i] > dpd[i - 1])
-    first = (by_m[0].avg_balance_inr + by_m[1].avg_balance_inr) / 2
-    last = (by_m[4].avg_balance_inr + by_m[5].avg_balance_inr) / 2
+    first = by_m[0].avg_balance_inr + by_m[1].avg_balance_inr
+    last = by_m[4].avg_balance_inr + by_m[5].avg_balance_inr
+    num, den = BALANCE_STRESS_LAST_OVER_FIRST
     return {
         "F_ews_dpd_rising": rises >= 3 or max(dpd) >= 30,
         "F_ews_emi_bounces": sum(r.emi_bounced for r in by_m) >= 2,
         "F_ews_partial_payments": sum(r.partial_payment for r in by_m) >= 2,
-        "F_ews_balance_stress": first > 0 and last <= 0.6 * first,
+        "F_ews_balance_stress": first > 0 and den * last <= num * first,
     }
 
 
@@ -372,29 +392,63 @@ def willingness_level(file: LoanFile) -> int:
     return 4
 
 
+def band_level(edges: tuple[float, ...], value: float) -> int:
+    """Index of the left-closed band [edges[i-1], edges[i]) that ``value`` falls in: 0 below the first edge, up to
+    ``len(edges)`` at or above the last."""
+    return bisect.bisect_right(edges, round(float(value), BAND_ROUND))
+
+
+def foir_headroom_pts(file: LoanFile) -> float:
+    """Segment FOIR limit minus true FOIR, in points, from observed fields (what the state's ``foir_headroom_pts_band``
+    bands). Not defined for MSME, which is judged on DSCR."""
+    return FOIR_LIMIT_PCT[file.segment] - true_foir_pct(file)
+
+
+def ltv_headroom_pts(file: LoanFile) -> float:
+    """LTV limit minus LTV, in points (home loans)."""
+    assert file.property is not None
+    return (ltv_limit_pct(file) or 80.0) - file.property.ltv
+
+
+def foir_within_limit(file: LoanFile) -> bool:
+    """C_foir_within_limit: MSME DSCR at least 1.25, otherwise FOIR within the segment limit (headroom at least 0)."""
+    if file.segment == "msme_business":
+        return round(true_dscr(file), BAND_ROUND) >= DSCR_MIN
+    return round(foir_headroom_pts(file), BAND_ROUND) >= 0
+
+
 def capacity_level(file: LoanFile) -> int:
-    """C_capacity 0-4 from r = FOIR / segment limit (MSME: 1.25 / DSCR): r <= 0.6 is 4, <= 0.8 is 3, <= 1.0 is 2,
-    <= 1.2 is 1, else 0; then one level is lost when income volatility is high (cv >= 0.35)."""
-    r = true_foir_pct(file) / FOIR_LIMIT_PCT[file.segment]
-    level = 4 if r <= 0.6 else 3 if r <= 0.8 else 2 if r <= 1.0 else 1 if r <= 1.2 else 0
-    if file.income.volatility_cv >= 0.35:
+    """C_capacity 0-4, read straight off state bands. Non-MSME: ``foir_headroom_pts_band`` (headroom = segment limit
+    minus FOIR) >=20 is 4, 10-20 is 3, 0-10 is 2, -10-0 is 1, <-10 is 0. MSME: ``business.dscr_band`` >2 (2.0 or more) is
+    4, 1.5-2 is 3, 1.25-1.5 is 2, 1-1.25 is 1, <1 is 0. Then one level is lost (floor 0) when volatility is high
+    (``income.volatility`` band "high", cv >= 0.35)."""
+    if file.segment == "msme_business":
+        level = band_level(DSCR_EDGES, true_dscr(file))
+    else:
+        level = band_level(FOIR_HEADROOM_EDGES, foir_headroom_pts(file))
+    if file.income.volatility_cv >= VOLATILITY_HIGH_CV:
         level = max(0, level - 1)
     return level
 
 
+def income_stable(file: LoanFile) -> bool:
+    """C_income_stable: volatility band "low" (cv < 0.25) and at least 12 months of income history."""
+    return file.income.volatility_cv < VOLATILITY_STABLE_CV and file.income.months_history >= 12
+
+
 def collateral_level(file: LoanFile) -> int:
-    """C_collateral_adequacy 0-4 (home loans). Base from headroom under the LTV limit (>= 15 points is 4, >= 8 is
-    3, >= 0 is 2, >= -5 is 1, else 0), minus 2 for a disputed title, 1 for a pending mutation, 1 for an adverse
-    legal opinion, 1 for a valuation spread of 15 percent or more; floored at 0."""
+    """C_collateral_adequacy 0-4 (home loans), read straight off state bands. Base from ``ltv_headroom_pts_band``
+    (limit minus LTV): >=15 is 4, 8-15 is 3, 0-8 is 2, -5-0 is 1, <-5 is 0. Then minus 2 for a disputed title, 1 for a
+    pending mutation, 1 for an adverse legal opinion, and 1 for ``valuation_spread_band`` ">20%" (spread of 20 percent
+    or more); floored at 0."""
     prop = file.property
     assert prop is not None
-    headroom = (ltv_limit_pct(file) or 80.0) - prop.ltv
-    level = 4 if headroom >= 15 else 3 if headroom >= 8 else 2 if headroom >= 0 else 1 if headroom >= -5 else 0
+    level = band_level(LTV_HEADROOM_EDGES, ltv_headroom_pts(file))
     level -= {"clear": 0, "pending_mutation": 1, "disputed": 2}[prop.title_status]
     if prop.legal_opinion == "adverse":
         level -= 1
     lo, hi = sorted((prop.market_value_inr, prop.valuation_2_inr))
-    if lo > 0 and (hi - lo) / hi >= 0.15:
+    if hi > 0 and round((hi - lo) / hi, BAND_ROUND) >= VALUATION_SPREAD_HIGH:
         level -= 1
     return max(0, level)
 
@@ -411,7 +465,6 @@ def question_truth(file: LoanFile) -> dict[str, bool | int]:
         "D_doubt_collateral": "collateral",
         "D_doubt_thin_file": "bureau_thin_file",
     }
-    foir_ok = true_dscr(file) >= DSCR_MIN if file.segment == "msme_business" else true_foir_pct(file) <= FOIR_LIMIT_PCT[file.segment]
     truth: dict[str, bool | int] = {
         "A_income_proof_current": "income_proof" not in lab.missing_items,
         "A_address_proof_valid": "address_proof" not in lab.missing_items,
@@ -424,8 +477,8 @@ def question_truth(file: LoanFile) -> dict[str, bool | int]:
         "C_willingness": willingness_level(file),
         "C_recent_delinquency": file.bureau.max_dpd_12m >= 30,
         "C_capacity": capacity_level(file),
-        "C_foir_within_limit": foir_ok,
-        "C_income_stable": file.income.volatility_cv < 0.25 and file.income.months_history >= 12,
+        "C_foir_within_limit": foir_within_limit(file),
+        "C_income_stable": income_stable(file),
         "D_closeness": lab.closeness_level,
         "E_memo_matches_grid": "memo_condition_mismatch" not in lab.memo_defects,
         "E_rate_math_correct": "apr_math_wrong" not in lab.memo_defects,

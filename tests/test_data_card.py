@@ -62,3 +62,41 @@ def test_every_question_family_and_covenant_is_documented():
     for section in ("Purpose, and what this data must never be used for", "The risk function", "The synthetic credit policy",
                     "Engineered disparities", "Known unrealistic aspects", "Base rates, measured"):
         assert section in CARD
+
+
+def test_truth_alignment_edges_in_the_card_match_the_code():
+    from jevloan.data import risk
+
+    section = CARD.split("### Truth alignment")[1].split("### `labels.question_truth`")[0]
+    fmt = lambda edges: ", ".join(f"{e:g}" for e in edges)  # noqa: E731
+    rows = {
+        "FOIR_HEADROOM_EDGES": fmt(risk.FOIR_HEADROOM_EDGES), "DSCR_EDGES": fmt(risk.DSCR_EDGES),
+        "LTV_HEADROOM_EDGES": fmt(risk.LTV_HEADROOM_EDGES),
+        "VOLATILITY_STABLE_CV": f"{risk.VOLATILITY_STABLE_CV:g} and {risk.VOLATILITY_HIGH_CV:g}",
+        "VALUATION_SPREAD_HIGH": f"{100 * risk.VALUATION_SPREAD_HIGH:g}%",
+        "BALANCE_STRESS_LAST_OVER_FIRST": "{} / {}".format(*risk.BALANCE_STRESS_LAST_OVER_FIRST),
+    }
+    for constant, text in rows.items():
+        line = next(l for l in section.splitlines() if constant in l)
+        assert f"| {text} |" in line, (constant, text, line)
+    assert "6 places" in section and "left closed" in section
+
+
+def test_truth_definitions_and_level_distributions_in_the_card_match_the_book():
+    book = book_2000()
+    for text in ("`foir_headroom_pts_band`", "`ltv_headroom_pts_band`", "`business.dscr_band`", "falling_40_plus",
+                 "`dpd_days`", "`valuation_spread_band` `>20%`", "under 0.25", "0.35 or more"):
+        assert text in CARD, text
+
+    def dist(q, files):
+        n = len(files)
+        return ", ".join(f"{100 * sum(f.labels.question_truth[q] == k for f in files) / n:.1f}%" for k in range(5))
+
+    home = [f for f in book if f.property]
+    for q, files in (("C_capacity", book), ("C_collateral_adequacy", home), ("C_willingness", book)):
+        assert dist(q, files) in CARD, (q, dist(q, files))
+
+
+def test_alias_convention_is_described_in_the_card():
+    for text in ("pii_inventory.aliases", "Latin line1 of the address\n  it renders", "Never aliased", "second PAN"):
+        assert text in CARD, text

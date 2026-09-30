@@ -1,0 +1,158 @@
+# Routing policy: the only place where model answers become routing decisions (PLAN sections 3.9 and 3.10).
+# Read by jevloan.policy.config.load_policy(); every threshold below is read from here, none is hard-coded.
+#
+# Reading guide
+#   * A Noul's confidence is derived as abs(2p - 1); Score and Choice use the API's `confidence`.
+#   * A routing question (modules A, B, C) below its minimum confidence sends the file to a human (LOW_CONFIDENCE).
+#   * Score features are normalised to expected_level / (levels - 1); yes_is_bad Nouls contribute 1 - p.
+#   * closeness (module D, decision D7) is the D_closeness score normalised to [0, 1]: 0 = clearly unsanctionable,
+#     1 = clearly sanctionable. The credit_review queue lists nearest-to-passing first; ties go to the oldest item.
+#   * Nothing here can sanction a loan. `decline.require_human_confirmation` and `modules.B.never_auto_decline`
+#     are validated to be true at load time; there is no code path that switches them off.
+#   * The C bands are a starting point. They may be tuned on the dev split only (decision D13), and any change
+#     bumps `version`.
+version: "policy-2026.09-v1"
+
+# Decision D9: a named human owns every exception queue. Dev may run with UNASSIGNED; production start-up refuses.
+owners:
+  credit_exceptions: {role: "Zonal Credit Head", owner_name: UNASSIGNED}
+  fraud_investigation: {role: "Head, Fraud Risk Control Unit", owner_name: UNASSIGNED}
+  deficiency_ops: {role: "Branch Operations Manager", owner_name: UNASSIGNED}
+  decline_confirmation: {role: "Credit Manager (sanctioning authority)", owner_name: UNASSIGNED}
+  disbursal_correction: {role: "Central Processing Unit Lead", owner_name: UNASSIGNED}
+  watchlist_review: {role: "Credit Monitoring Head", owner_name: UNASSIGNED}
+  model_risk: {role: "Chief Risk Officer (model risk)", owner_name: UNASSIGNED}
+
+# queue -> the owner key (above) who answers for it
+queues:
+  credit_review: credit_exceptions
+  fraud_investigation: fraud_investigation
+  deficiency_ops: deficiency_ops
+  decline_confirmation: decline_confirmation
+  disbursal_correction: disbursal_correction
+  watchlist_review: watchlist_review
+
+noul_confidence: "abs(2p-1)"
+min_confidence: {noul: 0.5, choice: 0.5, score: 0.45}   # below this on a routing question -> HUMAN_REVIEW, reason LOW_CONFIDENCE
+
+modules:
+  # A: file readiness. A confident fail (p below the threshold with enough confidence) -> deficiency notice.
+  A:
+    fail_if_p_below: 0.5
+    on_fail: DEFICIENCY_NOTICE
+    missing_item_names:
+      A_income_proof_current: "Current income proof (salary slips within 2 months / latest ITR)"
+      A_address_proof_valid: "Valid address proof (current, legible and in the applicant's name)"
+      A_statements_cover_months: "Bank statements covering the required number of months"
+      A_fields_cohere: "Application fields consistent with each other and with the supporting documents"
+
+  # B: fraud screen. A confident signal -> fraud investigation, never a decline.
+  B:
+    investigate_if:
+      yes_is_bad: {p_at_least: 0.8}
+      yes_is_good: {p_at_most: 0.2}
+    on_signal: FRAUD_INVESTIGATION
+    never_auto_decline: true
+
+  # C: appraisal support. Weighted composite per segment; weights sum to 1 and are renormalised over the
+  # questions that apply to a file.
+  C:
+    segments:
+      salaried_personal:
+        weights: {C_willingness: 0.30, C_capacity: 0.30, C_foir_within_limit: 0.15, C_income_stable: 0.10, C_recent_delinquency: 0.15}
+        bands: {pass: 0.70, borderline: 0.50}
+      self_employed:
+        weights: {C_willingness: 0.25, C_capacity: 0.30, C_foir_within_limit: 0.15, C_income_stable: 0.15, C_recent_delinquency: 0.15}
+        bands: {pass: 0.70, borderline: 0.50}
+      msme_business:
+        weights: {C_willingness: 0.25, C_capacity: 0.35, C_foir_within_limit: 0.15, C_income_stable: 0.10, C_recent_delinquency: 0.15}
+        bands: {pass: 0.70, borderline: 0.50}
+      secured_home:
+        weights:
+          C_willingness: 0.25
+          C_capacity: 0.25
+          C_foir_within_limit: 0.10
+          C_income_stable: 0.05
+          C_recent_delinquency: 0.10
+          C_collateral_adequacy: 0.15
+          C_collateral_title_clear: 0.10
+        bands: {pass: 0.70, borderline: 0.50}
+
+  # D: exception triage for borderline files. Orders the credit_review queue and attaches the top doubt factor.
+  D:
+    order_by: closeness_desc
+    attach_top_doubt: true
+
+  # E: memo and KFS consistency. Uncertainty blocks disbursal; it never clears it.
+  E:
+    fail_if_p_below: 0.5
+    deterministic_apr_tolerance_pp: 0.10   # |stated APR - recomputed APR| above this blocks, whatever the model says
+    on_fail: DISBURSAL_BLOCKED
+
+  # F: post-disbursal monitoring. warnings = count(F_ews_* with p >= warning_threshold_p)
+  #    + covenant_breach_counts_as * count(F_covenant_* with p <= 1 - warning_threshold_p).
+  #    tiers: minimum warnings for each watchlist tier (T0 is anything below T1). T1 and above go to human review.
+  F:
+    warning_threshold_p: 0.6
+    tiers: {T1: 1, T2: 2, T3: 3}
+    covenant_breach_counts_as: 2
+
+decline:
+  require_human_confirmation: true
+
+# Reason codes a reviewer records with accept / modify / reject, grouped by the queue they belong to.
+reason_codes:
+  credit_review:
+    ACCEPT_AS_ADVISED: "Reviewer agrees with the advisory routing and its stated reasons."
+    MODIFY_TERMS: "Reviewer proceeds but changes the terms (amount, tenure, conditions) from what was advised."
+    REJECT_MODEL_MISREAD_DOCS: "Model misread or misjudged the supporting documents."
+    REJECT_MODEL_MISREAD_CONDUCT: "Model misjudged repayment conduct on existing obligations."
+    REJECT_MODEL_MISREAD_CAPACITY: "Model misjudged repayment capacity (income, obligations or stability)."
+    OVERRIDE_POLICY_EXCEPTION: "Reviewer overrides the advice under a documented policy exception."
+    MANUAL_APPRAISAL_COMPLETED: "Model output was unavailable or not confident enough; appraised manually."
+  fraud_investigation:
+    FRAUD_CONFIRMED: "Investigation confirmed the fraud signal."
+    FRAUD_CLEARED: "Investigation cleared the fraud signal; the file returns to appraisal."
+    FRAUD_INCONCLUSIVE_ESCALATED: "Investigation was inconclusive and was escalated to the fraud risk control unit."
+  deficiency_ops:
+    DEFICIENCY_CURED: "The missing or invalid item was obtained from the applicant."
+    DEFICIENCY_NOT_CURABLE: "The applicant cannot supply the item; the file cannot proceed."
+    DEFICIENCY_MODEL_MISREAD: "The item was present and valid; the model was wrong."
+  decline_confirmation:
+    DECLINE_CONFIRMED: "Sanctioning authority confirms the recommended decline."
+    DECLINE_OVERRIDDEN_TO_REVIEW: "Sanctioning authority sends the file back for credit review."
+    DECLINE_MODEL_MISREAD: "Sanctioning authority finds the model misjudged the file."
+  disbursal_correction:
+    MEMO_CORRECTED: "Sanction memo corrected to match the policy grid."
+    KFS_CORRECTED: "Key Fact Statement corrected (rate, APR or disclosures)."
+    DISBURSAL_BLOCK_FALSE_ALARM: "The block was unwarranted; documents were already consistent."
+  watchlist_review:
+    WATCHLIST_ESCALATED: "Account moved to a higher watchlist tier or to recovery."
+    WATCHLIST_MONITOR: "Account stays on the watchlist under routine monitoring."
+    WATCHLIST_FALSE_ALARM: "Warning signals were spurious; the account is removed from the watchlist."
+    WATCHLIST_RESOLVED: "The cause of the warning was resolved with the borrower."
+
+# Codes the engine itself attaches to a decision (StageDecision.reason_codes). Reviewers cannot record these.
+system_reason_codes:
+  MODEL_TIMEOUT: "Jev did not answer within the time budget."
+  MODEL_ERROR: "Jev returned an error or an unusable response."
+  MODEL_RATE_LIMITED: "Jev rate-limited the request."
+  MODEL_UNREACHABLE: "Jev could not be reached."
+  CIRCUIT_OPEN: "The circuit breaker is open: files go to humans without a model call."
+  PII_BLOCKED: "The PII gate blocked the request; nothing was sent to the model."
+  FORCED_HUMAN_REVIEW: "The kill switch is on: every file goes to a human."
+  LOW_CONFIDENCE: "A routing question was answered below its minimum confidence (or not at all)."
+  FRAUD_SIGNAL: "A confident fraud signal was raised."
+  READINESS_FAIL: "A required item is missing or invalid."
+  COMPOSITE_PASS: "The appraisal composite is in the pass band."
+  COMPOSITE_BORDERLINE: "The appraisal composite is in the borderline band."
+  COMPOSITE_FAIL: "The appraisal composite is in the fail band."
+  NO_APPRAISAL_ANSWERS: "No appraisal answers were usable, so no composite could be computed."
+  APR_MISMATCH_DETERMINISTIC: "The stated APR differs from the recomputed APR by more than the tolerance."
+  APR_CHECK_UNAVAILABLE: "The stated or recomputed APR is missing, so the deterministic APR check could not run."
+  E_CHECK_FAILED: "A memo or KFS check failed with confidence."
+  MEMO_KFS_CONSISTENT: "All memo and KFS checks passed with confidence."
+  WATCHLIST_T0: "No early-warning tier reached."
+  WATCHLIST_T1: "Watchlist tier T1 reached."
+  WATCHLIST_T2: "Watchlist tier T2 reached."
+  WATCHLIST_T3: "Watchlist tier T3 reached."

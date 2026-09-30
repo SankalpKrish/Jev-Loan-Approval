@@ -511,6 +511,40 @@ async def test_force_human_review_sends_nothing_and_stores_no_unchecked_state(ma
 # --- backend selection ---------------------------------------------------------------------------------------
 
 
+async def test_kill_switch_blocks_a_request_already_waiting_for_capacity(make_gateway):
+    counting = CountingTransport(sim_transport())
+    gateway = make_gateway(counting, max_concurrency=1)
+    await gateway._slots.acquire()
+    pending = asyncio.create_task(ask(gateway))
+    await asyncio.sleep(0)
+    gateway._runtime.force_human_review = True
+    gateway._slots.release()
+    result = await pending
+    assert result.failure == "forced_human"
+    assert counting.requests == []
+    assert make_gateway.audit.verify().ok
+
+
+async def test_kill_switch_blocks_a_request_already_waiting_for_rate_limit(make_gateway):
+    counting = CountingTransport(sim_transport())
+    gateway = make_gateway(counting)
+    entered, released = asyncio.Event(), asyncio.Event()
+
+    async def wait_for_rate_limit():
+        entered.set()
+        await released.wait()
+
+    gateway._limiter.acquire = wait_for_rate_limit
+    pending = asyncio.create_task(ask(gateway))
+    await entered.wait()
+    gateway._runtime.force_human_review = True
+    released.set()
+    result = await pending
+    assert result.failure == "forced_human"
+    assert counting.requests == []
+    assert make_gateway.audit.verify().ok
+
+
 def test_real_backend_needs_an_api_key(tmp_db, monkeypatch):
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     with pytest.raises(ConfigError, match="TYPESAFE_API_KEY"):

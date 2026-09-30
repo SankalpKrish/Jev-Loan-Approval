@@ -201,9 +201,15 @@ class JevGateway:
         entry |= {"state_json": state_text, "questions_json": canonical_json(questions)}  # vetted: safe to keep
 
         async with self._slots:
+            if self._runtime.force_human_review:
+                return self._failed(entry, request_ts, "forced_human", "kill switch enabled while waiting for capacity")
             if not self.breaker.allow():
                 return self._failed(entry, request_ts, "circuit_open", "circuit breaker open: Jev was not called")
             await self._limiter.acquire()
+            if self._runtime.force_human_review:
+                return self._failed(entry, request_ts, "forced_human", "kill switch enabled while waiting for rate limit")
+            if self.breaker.state == "open":
+                return self._failed(entry, request_ts, "circuit_open", "circuit breaker opened while waiting for rate limit")
             request_ts = utc_now_iso()
             started = time.perf_counter()
             try:

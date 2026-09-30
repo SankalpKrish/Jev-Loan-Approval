@@ -9,8 +9,8 @@ This plan is the contract every build agent works from. If code and plan disagre
 
 | Role | Who | Does |
 |---|---|---|
-| Orchestrator | Opus (main session) | Owns this plan, the contracts, and the pre-registered thresholds. Reviews every diff, runs the tests, fixes bugs, integrates the pieces, and runs the acceptance checks. Commits once per milestone. |
-| Builders | Sonnet 5.5 subagents | Write all production code, tests, and fixtures. Each one gets a brief that names the files it owns and the plan sections it implements. |
+| Orchestrator | Codex main session (continuing Claude's handoff) | Owns this plan, the contracts, and the pre-registered thresholds. Reviews the work, runs the tests, fixes bugs, integrates the pieces, and runs the acceptance checks. |
+| Builders | Luna subagents | Implement scoped production code, tests, and fixtures. Each one gets a brief that names its files and contracts; bugs and integration decisions return to the orchestrator. |
 
 Rules for builders:
 1. Touch only the files you own. If a contract has to change, stop and report it; don't change it quietly.
@@ -248,12 +248,12 @@ Appraisal stage (top-level keys are fixed, and a segment leaves out the blocks i
 { "schema": "jevloan.state.v1", "stage": "appraisal", "segment": ...,
   "application": {product, loan_amount_band, tenure_months, purpose, employment_type, years_in_job_or_business_band, declared_monthly_income_band, applicant_age_band, city_tier},
   "bureau": {score_band: NTC|<600|600-649|650-699|700-749|750-799|800+, active_loans, max_dpd_12m_band: 0|1-29|30-59|60-89|90+, enquiries_6m, writeoffs_or_settlements, history_length_band},
-  "income": {verified_monthly_income_band, volatility: low|moderate|high, months_history, documentation_type},
-  "obligations": {existing_emi_band, proposed_emi_band, foir_pct_band: <30|30-40|40-50|50-55|55-60|60-70|>70, segment_foir_limit_pct, credit_card_utilization_band},
+  "income": {verified_monthly_income_band, volatility: low (<0.25) | moderate (0.25–0.35) | high (≥0.35), months_history, documentation_type},
+  "obligations": {existing_emi_band, proposed_emi_band, foir_pct_band: <30|30-40|40-50|50-55|55-60|60-70|>70, segment_foir_limit_pct, foir_headroom_pts_band: ">=20"|"10-20"|"0-10"|"-10-0"|"<-10" (limit minus FOIR, in points; non-MSME only), credit_card_utilization_band},
   "bank": {months_covered, months_required, most_recent_month_age, salary_credits_months, salary_narration_org_token, avg_monthly_credits_band, emi_bounces_6m, cash_deposit_share_band, min_balance_breaches_6m},
   "gst": {filings_on_time_12m, months_filed, gst_turnover_band_12m, bank_credits_band_12m, gst_to_bank_ratio_band: <0.5|0.5-0.8|0.8-1.2|1.2-2|>2},     # business only
   "business": {dscr_band: <1|1-1.25|1.25-1.5|1.5-2|>2, vintage_years_band},                                                                       # msme / self_employed
-  "property": {property_type, market_value_band, ltv_pct_band: <60|60-70|70-75|75-80|80-85|>85, ltv_limit_pct, title_status, legal_opinion, valuation_spread_band: <5%|5-10%|10-20%|>20%},  # secured_home only
+  "property": {property_type, market_value_band, ltv_pct_band: <60|60-70|70-75|75-80|80-85|>85, ltv_limit_pct, ltv_headroom_pts_band: ">=15"|"8-15"|"0-8"|"-5-0"|"<-5" (limit minus LTV), title_status, legal_opinion, valuation_spread_band: <5%|5-10%|10-20%|>20%},  # secured_home only
   "identity_signals": {pan_aadhaar_linked, phone_vintage_band: <3m|3-12m|1-3y|>3y, email_domain_type, address_shared_with_other_apps_band: 0|1-2|3+, bureau_history_consistent_with_age},
   "entity_roles": {          # what the APPLICATION FORM declares, tokenised with the same per-file Redactor as the documents
       "applicant": {name: "[APPLICANT]", pan, uid, phone, residence_address, birth: "[DOB_1]", employer (salaried only)},
@@ -267,7 +267,7 @@ Birth dates: after redaction, the state builder rewrites every document mention 
 
 Sanction-docs stage: `{schema, stage, segment, "sanction_memo": {text, product, ticket_band, tenure_months, conditions}, "kfs": {text, apr_stated_pct, apr_recomputed_pct, rate_pct, tenure_months}, "policy_grid_row": {product, band, max_tenure_months, required_conditions: [{id, text}], max_ltv_pct?}, "required_disclosures": [{id, heading}]}`. The grid row comes from `schema.grid_row_for(product, principal)` and is bank policy, not personal data. `apr_recomputed_pct` comes from `finance.apr_from_components`. Percentages are rounded to 2 decimals and aren't personal data.
 
-Monitoring stage: `{schema, stage, segment, "loan": {product, loan_amount_band, tenure_months, months_since_disbursal}, "repayment": [{m, dpd_band, emi_bounced, partial_payment, avg_balance_band}], "covenants": [{covenant_id, required, reported_value_band, evidence_text}]}`.
+Monitoring stage: `{schema, stage, segment, "loan": {product, loan_amount_band, tenure_months, months_since_disbursal, balance_change_band: "rising"|"flat"|"falling_10_40"|"falling_40_plus" (average balance of the last 2 months against the first 2)}, "repayment": [{m, dpd_days (small integer, not personal data), dpd_band, emi_bounced, partial_payment, avg_balance_band}], "covenants": [{covenant_id, required, reported_value_band, evidence_text}]}`.
 
 Checks (W2-state):
 - `state/tokens.py`: `estimate_tokens(obj) = ceil(len(canonical_json(obj)) / 2.2)`. This was calibrated against real Jev on 2026-09-29 (jev-1.13.0 bills about 2.2–2.3 characters per token). The state is billed once per request, each question adds only its own text, and there's roughly 350 tokens of fixed overhead. A 3k-token state is therefore about 6.5 KB of canonical JSON.
@@ -293,6 +293,8 @@ Rubric format, which is mandatory for every question. It follows the vendor's st
 - Choice: `criteria = {option: {"what": ..., "not_for": ..., "examples": [...]}}`.
 - A test checks that every question passes `PIIGate.check` and that every rubric has 2–3 examples per side or level.
 
+**Truth-alignment rule (added 2026-09-30 after the first real-Jev probe):** every per-question truth is a function of what the state shows, meaning its bands, tokens, flags and small integers. Thresholds sit on band edges. Per-question calibration then measures whether Jev *reads the state correctly*. The loss from coarsening true features into bands shows up in module-level agreement against the true synthetic credit decision (`sanctionable`, `outcome_12m`), which still uses the true features.
+
 | qid | type | segments | polarity | truth (the generator computes this into `labels.question_truth`) |
 |---|---|---|---|---|
 | **A: readiness** (appraisal) |
@@ -308,10 +310,10 @@ Rubric format, which is mandatory for every question. It follows the vendor's st
 | **C: appraisal support** (appraisal) |
 | C_willingness | score (5) | all | ordinal_high_is_good | level from max_dpd_12m, writeoffs, bounces (0 serious delinquency … 4 spotless) |
 | C_recent_delinquency | noul | all | yes_is_bad | max_dpd_12m ≥ 30 |
-| C_capacity | score (5) | all | ordinal_high_is_good | level from the true FOIR (or DSCR) relative to the limit, and volatility |
+| C_capacity | score (5) | all | ordinal_high_is_good | non-MSME: `foir_headroom_pts_band` ≥20 → 4, 10–20 → 3, 0–10 → 2, −10–0 → 1, <−10 → 0. MSME: `dscr_band` >2 → 4, 1.5–2 → 3, 1.25–1.5 → 2, 1–1.25 → 1, <1 → 0. Then −1 (floored at 0) when `income.volatility == high` (cv ≥ 0.35) |
 | C_foir_within_limit | noul | all | yes_is_good | true FOIR ≤ limit (for MSME: DSCR ≥ 1.25) |
-| C_income_stable | noul | all | yes_is_good | volatility_cv < 0.25 and months_history ≥ 12 |
-| C_collateral_adequacy | score (5) | secured_home | ordinal_high_is_good | from LTV vs limit, title, legal opinion, valuation spread |
+| C_income_stable | noul | all | yes_is_good | volatility_cv < 0.25 (`income.volatility == low`; the state's volatility edges are [0.25, 0.35]) and months_history ≥ 12 |
+| C_collateral_adequacy | score (5) | secured_home | ordinal_high_is_good | `ltv_headroom_pts_band` ≥15 → 4, 8–15 → 3, 0–8 → 2, −5–0 → 1, <−5 → 0. Then −2 for a disputed title, −1 for a pending mutation, −1 for an adverse legal opinion, −1 for a valuation spread ≥ 20% (band edge), floored at 0 |
 | C_collateral_title_clear | noul | secured_home | yes_is_good | title_status == clear and legal_opinion == positive |
 | **D: triage** (appraisal, speculative) |
 | D_closeness | score (5) | all | ordinal_high_is_good | labels.closeness_level |
@@ -327,10 +329,10 @@ Rubric format, which is mandatory for every question. It follows the vendor's st
 | E_disclosures_complete | noul | all | yes_is_good | no `disclosure_missing:*` in memo_defects |
 | E_disclosure_<name> | noul | all | yes_is_good | one per required disclosure, speculative, used as the reason |
 | **F: monitoring** (monitoring) |
-| F_ews_dpd_rising | noul | all | yes_is_bad | ews_truth |
+| F_ews_dpd_rising | noul | all | yes_is_bad | ews_truth: `dpd_days` strictly increases across ≥3 of the last 4 months, or any `dpd_days` ≥ 30 |
 | F_ews_emi_bounces | noul | all | yes_is_bad | ews_truth (≥ 2 bounces in 6 months) |
 | F_ews_partial_payments | noul | all | yes_is_bad | ews_truth |
-| F_ews_balance_stress | noul | all | yes_is_bad | ews_truth (average balance falling ≥ 40%) |
+| F_ews_balance_stress | noul | all | yes_is_bad | ews_truth: average balance of the last 2 months ≥ 40% below the first 2, which is exactly `loan.balance_change_band == falling_40_plus` |
 | F_covenant_<covenant_id> | noul | msme_business | yes_is_good | covenant_id not in covenant_breaches |
 
 MSME covenants: `dscr_min_1_25`, `stock_statement_monthly`, `no_unapproved_borrowing`, `insurance_current`.
@@ -461,3 +463,39 @@ These are fixed in `config/parity_thresholds.yaml` and `docs/GO_NO_GO_MEMO_TEMPL
 | The simulator flatters the system | Simulator numbers are never a GO (D10) |
 | Name detection is incomplete, especially in native scripts | Known entities get redacted first; the lexicon and pattern gate is a backstop; the limits are named in the README and memo |
 | Rubric token cost | Measured and reported. Irrelevant at about $0.04 per million tokens, but kept visible |
+
+---
+
+## 8. Completion handoff — 2026-09-30
+
+Claude's committed W0/W1 foundation and existing W2 work have been completed through W3–W6 documentation.
+Luna agents implemented scoped pipeline, evaluation, API, chaos-test, and documentation tasks; Codex handled
+integration, debugging, authorization fixes, event-loop scheduling, reporting correctness, and acceptance.
+
+| Milestone | Recorded result |
+| --- | --- |
+| M0 | Simulator hello and both opt-in real-Jev smoke tests passed |
+| M1 | 2,000 files, all 41 questions validated; appraisal state mean 1,365 / p99 1,512 tokens; 6,000 state scans with zero inventory hits or gate findings; supported PII fixtures 264/264, clean false positives 0/121 |
+| M2 | Full simulator replay, 6,000 stage attempts, 2,000/2,000 complete trails, verified 16,081-entry audit chain |
+| M3 | Real replay `acceptance-real-v2`: 6,000 successful calls, no failures, 2,000/2,000 complete trails, verified 16,336-entry chain; completed measured **NO-GO** memo in `docs/GO_NO_GO_MEMO.md` |
+| M4 | Advisory API, reviewer page, and outage/kill-switch chaos coverage implemented; local browser review flow exercised |
+| M5 | Withheld because M3 is NO-GO, as required by the specification |
+
+The registered thresholds, policy, pricing, and rubrics were not tuned against the holdout. Headline metrics
+use 1,600 holdout files, with 400 dev files reported separately. Real-Jev failures are S7 (non-borderline C
+agreement 73.0% versus 85%), S9 (unexplained parity breaches), S10 (all three engineered disparities missed),
+and every module's required 2 pp gain over rules. The simulator misses two engineered disparities, so the
+full-book fairness-power gate is **failed**, although detector unit tests pass. M3 explicitly accepts a NO-GO
+with reasons; the model is not cleared for lending use.
+
+An earlier real run, `acceptance-real`, is retained as a diagnostic: synchronous state preparation delayed
+network responses and caused timeouts. Preparation now runs off the event loop, and the corrected full replay
+is the acceptance evidence. Reports were corrected for incidental PII matches in verified rubric boilerplate,
+E's actual disbursal-block outcome, abstention denominators, and unmeasured evidence. These are reporting and
+runtime repairs, not threshold changes. Production owner names and risk sign-off remain unassigned; the local
+reviewer API requires bank authentication and integration before any production use.
+
+Final validation: default suite **2,401 passed, 2 deselected**; separately opted-in real-Jev suite **2 passed**
+(hello and a successful 20-file smoke replay). Reviewer browser flow, acceptance-script syntax, and
+`git diff --check` passed. Raw synthetic book, audit databases, and frozen replay inputs remain Git-ignored
+in the workspace; measured reports and the completed memo are included in the handoff.

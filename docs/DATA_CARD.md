@@ -191,10 +191,10 @@ to three isolated events (a bounce or a partial payment), a small chance of a si
 
 `labels.ews_truth` is computed from those months:
 
-* `F_ews_dpd_rising`: DPD strictly higher than the previous month in at least 3 of months 3 to 6, or any month at 30 or more;
+* `F_ews_dpd_rising`: DPD (the state's `dpd_days`) strictly higher than the previous month in at least 3 of months 3 to 6, or any month at 30 or more;
 * `F_ews_emi_bounces`: 2 or more bounced EMIs in the six months;
 * `F_ews_partial_payments`: 2 or more partial payments;
-* `F_ews_balance_stress`: the mean balance of months 5 and 6 is at least 40% below the mean of months 1 and 2.
+* `F_ews_balance_stress`: the mean balance of months 5 and 6 is at most 0.6 times the mean of months 1 and 2 (at least 40% below; a tie counts, compared on integer sums). This is exactly the state's `loan.balance_change_band == falling_40_plus`.
 
 Measured: dpd rising 6.8%, bounces 7.4%, partial payments 3.7%, balance stress 8.2% of files; among files that
 default the rates are 91%, 87%, 32% and 84%, and among files that repay under 4% for each.
@@ -214,6 +214,25 @@ what the borrower reported; a breach compares them, and `evidence_text` says the
 Breach probability by outcome (repays / slips / defaults): DSCR 5% / 25% / 60%, stock statements 8% / 30% / 55%,
 borrowing 3% / 12% / 30%, insurance 5% / 18% / 35%.
 
+### Truth alignment
+
+Every per-question truth is a function of what the state shows (its bands, tokens, flags and small integers), with the
+thresholds on band edges (PLAN 3.8). Per-question calibration therefore measures whether the model reads the state
+correctly; what the coarsening costs shows up in module-level agreement against `sanctionable` and `outcome_12m`, which
+still use the true features (`sanctionable`, `closeness_level` and `primary_weakness` are unchanged by this rule).
+The edges are named constants in `data/risk.py`, repeated from the state's band tables because the data layer does not
+import from `state/`; `tests/test_data_truth_alignment.py` compares them to `jevloan.state.base.BAND_TABLES` and rebuilds
+the truths from real state output. All bands are left closed, `[lo, hi)`, on values rounded to 6 places.
+
+| constant | edges | state table | used by |
+|---|---|---|---|
+| `FOIR_HEADROOM_EDGES` | -10, 0, 10, 20 | `foir_headroom_pts` | `C_capacity` (non-MSME), `C_foir_within_limit` |
+| `DSCR_EDGES` | 1, 1.25, 1.5, 2 | `dscr` | `C_capacity` (MSME), `C_foir_within_limit` (MSME) |
+| `LTV_HEADROOM_EDGES` | -5, 0, 8, 15 | `ltv_headroom_pts` | `C_collateral_adequacy` |
+| `VOLATILITY_STABLE_CV`, `VOLATILITY_HIGH_CV` | 0.25 and 0.35 | `volatility` | `C_income_stable`, the `C_capacity` deduction |
+| `VALUATION_SPREAD_HIGH` | 20% | `valuation_spread` | the `C_collateral_adequacy` deduction |
+| `BALANCE_STRESS_LAST_OVER_FIRST` | 6 / 10 | `balance_change_band` (`falling_40_plus`) | `F_ews_balance_stress` |
+
 ### `labels.question_truth`
 
 One entry for every applicable question in section 3.8 of the plan: `bool` for a Noul (true means the answer is
@@ -231,10 +250,10 @@ One entry for every applicable question in section 3.8 of the plan: `bool` for a
 | `B_synthetic_identity_signals` | `fraud_type` is `synthetic_identity` (yes is bad) |
 | `C_willingness` (score 0 to 4) | 0: write-off or worst DPD 90 or more; 1: DPD 60 to 89; 2: DPD 30 to 59 or 2 or more bounces; 3: DPD 1 to 29 or one bounce; 4: spotless |
 | `C_recent_delinquency` | `max_dpd_12m` is 30 or more (yes is bad) |
-| `C_capacity` (score 0 to 4) | with r = FOIR / segment limit (MSME: 1.25 / DSCR): r at most 0.6 is 4, at most 0.8 is 3, at most 1.0 is 2, at most 1.2 is 1, above that 0; one level lost (floor 0) when volatility CV is 0.35 or more |
-| `C_foir_within_limit` | true FOIR is within the segment limit (MSME: DSCR at least 1.25) |
-| `C_income_stable` | `volatility_cv` under 0.25 and `months_history` at least 12 |
-| `C_collateral_adequacy` (home, score 0 to 4) | headroom under the LTV limit: 15 points or more is 4, 8 or more is 3, 0 or more is 2, down to -5 is 1, worse is 0; minus 2 for a disputed title, 1 for a pending mutation, 1 for an adverse legal opinion, 1 for a valuation spread of 15% or more; floor 0 |
+| `C_capacity` (score 0 to 4) | read off state bands. Non-MSME: headroom = segment FOIR limit minus true FOIR, in points (`foir_headroom_pts_band`): 20 or more is 4, 10 to 20 is 3, 0 to 10 is 2, -10 to 0 is 1, below -10 is 0. MSME: DSCR (`business.dscr_band`) of 2 or more is 4, 1.5 to 2 is 3, 1.25 to 1.5 is 2, 1 to 1.25 is 1, below 1 is 0. Then one level lost (floor 0) when volatility is high (CV 0.35 or more) |
+| `C_foir_within_limit` | headroom (segment FOIR limit minus true FOIR) is 0 or more; MSME: DSCR is at least 1.25 |
+| `C_income_stable` | `volatility_cv` under 0.25 (state volatility band `low`) and `months_history` at least 12 |
+| `C_collateral_adequacy` (home, score 0 to 4) | read off state bands. Headroom = LTV limit minus LTV, in points (`ltv_headroom_pts_band`): 15 or more is 4, 8 to 15 is 3, 0 to 8 is 2, -5 to 0 is 1, below -5 is 0; minus 2 for a disputed title, 1 for a pending mutation, 1 for an adverse legal opinion, 1 for a valuation spread of 20% or more (`valuation_spread_band` `>20%`); floor 0 |
 | `C_collateral_title_clear` (home) | title status is clear and legal opinion is positive |
 | `D_closeness` (score 0 to 4) | `closeness_level` |
 | `D_doubt_income_documentation`, `_repayment_history`, `_debt_burden`, `_stability`, `_thin_file` | `primary_weakness` equals `income_documentation`, `repayment_history`, `debt_burden`, `employment_or_business_stability`, `bureau_thin_file` (yes is bad) |
@@ -250,7 +269,7 @@ Measured "yes" rates (of applicable files): income proof current 94.6%, address 
 cover 96.4%, fields cohere 96.9%, identity coheres 97.5%, salary matches 97.3%, GST consistent 96.0%, FOIR within
 limit 88.4%, income stable 62.3%, recent delinquency 7.4%, memo matches grid 92.4%, rate math correct 93.2%,
 disclosures complete 94.1%. Covenants kept: DSCR 87.0%, stock statements 83.8%, no unapproved borrowing 94.0%,
-insurance current 91.8%. Because defect rates are small, several questions have few negatives: read
+insurance current 91.8%. Score levels 0 to 4: `C_capacity` 3.9%, 12.2%, 24.9%, 31.4%, 27.6% (all files); `C_collateral_adequacy` 8.8%, 11.4%, 28.4%, 28.2%, 23.2% (home files); `C_willingness` 2.9%, 1.2%, 6.4%, 21.8%, 67.7%. Because defect rates are small, several questions have few negatives: read
 per-question calibration with the negative count in mind.
 
 ## 6. Engineered disparities
@@ -284,13 +303,23 @@ reports INSUFFICIENT_N); PIN clusters 152 to 306 each; languages 161 to 899 each
   reports, valuation reports and employer letters, which state their own validity. Every document ends with
   "Received: 14 Sep 2026." (the application date), so expiry and staleness are readable without knowing today's date.
 * `pii_inventory`: person names are canonical (title case), applicant first; when the applicant has a native-script
-  name it is second, and it is an alias of the applicant, not another person (`applicant.name_native`). Phones are
-  the bare 10-digit number, Aadhaar and account numbers bare digits, PANs upper case, emails lower case,
-  address lines exactly as written (with an upper-case variant when a document prints it that way) and the same
-  address as one line with city, state and PIN, pincodes as ASCII digits (even when a native document writes
-  them in native digits). GSTINs are not listed: the PAN inside is (in `pans`). Masked forms
-  (`XXXX XXXX 0123`, `XXXXXXX3456`) are partial and not listed. Nothing is listed that is not written or in a
-  structured field, and everything written is listed (both directions are tested).
+  name it is second. Phones are the bare 10-digit number, Aadhaar and account numbers bare digits, PANs upper case,
+  emails lower case, address lines as written, pincodes ASCII digits (even when a native document writes them in native
+  digits). GSTINs are not listed: the PAN inside is (in `pans`). Masked forms (`XXXX XXXX 0123`, `XXXXXXX3456`) are
+  partial and not listed. Everything written is listed, and nothing is listed that is not written or in a structured
+  field, apart from the canonical side of an alias (both directions are tested).
+* `pii_inventory.aliases` maps another written form of the **same** real-world value to its canonical string, so a
+  redactor can give both one token. The key and the value are both also in the category list (a leak scan still searches
+  for both), and a value is never itself a key. Aliased: the one-line address (with city, state and PIN) and any
+  upper-case line1 to the address's `line1`; a native-script line1 or one-line address to the **Latin line1 of the address
+  it renders** (the applicant's home line1, or the other address for a mismatched proof); a native-script name to the
+  romanised name (the applicant's `name_native` to `name`, and a native-script landlord to the landlord's romanised name,
+  which is listed although only the native form is written); an initial form of the applicant (`K. Venkatesh`) to the full
+  name. Never aliased: anything deliberately different, which is the evidence: a fraud file's second PAN, different name
+  or different employer, an address whose PIN differs from the home address (a mismatched proof, a property, a business
+  address). Other formats of one value (a phone printed `+91 98765 43210`, a spaced Aadhaar, a lower-case PAN, an
+  upper-case name or organisation, an honorific) are covered by the canonical form through normalisation and are not
+  listed separately. Only names and addresses are ever aliased.
 * Documents are written with varied formats on purpose: `+91 98765 43210`, `98765-43210`, `09876543210`, spaced,
   dashed, plain and masked Aadhaar, upper-case names, honorifics (Mr., Shri, Smt.), initials (`K. Venkatesh`),
   `Rs. 1,45,000`, `Rs 1,45,000/-`, `₹1,45,000`, `INR 1,45,000.00`, `dd Mon yyyy`, `dd/mm/yyyy`, `dd-mm-yyyy`, and

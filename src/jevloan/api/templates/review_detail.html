@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Review item {{ item.id }}</title></head>
+<body>
+  <header><strong>Advisory review</strong><p>{{ disclaimer }}</p></header>
+  <main>
+    <p><a href="/review">Back to queue</a></p>
+    <h1>{{ item.file_id }} — {{ item.stage }}</h1>
+    <p>Queue: {{ item.queue }} · Advisory outcome: {{ item.outcome }}</p>
+    <section><h2>Top doubt factor</h2>{% if top_doubt %}<p>{{ top_doubt.text }}{% if top_doubt.p is not none %} (p={{ "%.3f"|format(top_doubt.p) }}){% endif %}</p>{% else %}<p>No top doubt factor was attached to this item.</p>{% endif %}</section>
+    <section><h2>Reasons</h2>
+      {% if reasons %}<ul>{% for reason in reasons %}<li>{{ reason.text }}{% if reason.p is not none %} ({{ "expected level" if reason.qid in score_qids else "p" }}={{ "%.3f"|format(reason.p) }}, confidence={{ "%.3f"|format(reason.confidence) }}){% endif %}</li>{% endfor %}</ul>
+      {% else %}<p>{{ item.reason_codes|join(", ") }}</p>{% endif %}
+    </section>
+    <section><h2>Model probabilities and confidence</h2>
+      {% if probabilities %}<table><thead><tr><th>Question</th><th>Type</th><th>Probability or score distribution</th><th>Confidence</th></tr></thead>
+      <tbody>{% for row in probabilities %}<tr><td>{{ row.qid }}</td><td>{{ row.type }}</td><td>{% if row.probability is mapping %}{% for level, p in row.probability.items() %}{{ level }}: {{ "%.3f"|format(p) }}{% if not loop.last %}; {% endif %}{% endfor %}{% elif row.probability is not none %}{{ "%.3f"|format(row.probability) }}{% else %}Unavailable{% endif %}</td><td>{{ "%.3f"|format(row.confidence) if row.confidence is not none else "Unavailable" }}</td></tr>{% endfor %}</tbody></table>
+      {% else %}<p>No successful model answer is recorded for this stage.</p>{% endif %}
+    </section>
+    {% if item.status == "open" %}<form method="post" action="/review/{{ item.id }}/decision">
+      <label>Reviewer name <input name="reviewer_id" required maxlength="120"></label>
+      <label>Human decision <select name="decision" required><option value="">Choose…</option><option value="accept">Accept recommendation</option><option value="modify">Modify</option><option value="reject">Reject recommendation</option></select></label>
+      <label>Reason code <select name="reason_code" required><option value="">Choose…</option>{% for code in reason_codes %}<option value="{{ code }}">{{ code }}</option>{% endfor %}</select></label>
+      <label>Notes <textarea name="notes" maxlength="2000"></textarea></label>
+      <button type="submit">Record human decision</button>
+    </form>{% else %}<p>Human decision: {{ item.decision }} by {{ item.reviewer_id }}.</p>{% endif %}
+  </main>
+</body>
+</html>

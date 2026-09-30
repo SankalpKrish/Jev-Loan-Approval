@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Human review queue</title></head>
+<body>
+  <header><strong>Advisory review</strong><p>{{ disclaimer }}</p></header>
+  <main>
+    <h1>Open review items</h1>
+    {% if items %}
+    <table>
+      <thead><tr><th>File</th><th>Stage</th><th>Queue</th><th>Advisory outcome</th><th>Reason</th></tr></thead>
+      <tbody>{% for item in items %}<tr>
+        <td><a href="/review/{{ item.id }}">{{ item.file_id }}</a></td>
+        <td>{{ item.stage }}</td><td>{{ item.queue }}</td><td>{{ item.outcome }}</td>
+        <td>{% if item.top_reason %}{{ item.top_reason.text }}{% else %}{{ item.reason_codes|join(", ") }}{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+    </table>
+    {% else %}<p>No open items.</p>{% endif %}
+  </main>
+</body>
+</html>
