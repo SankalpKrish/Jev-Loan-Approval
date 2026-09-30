@@ -1,0 +1,20 @@
+# Runtime settings. Loaded by jevloan.config.load_runtime().
+# Env overrides (a .env file in the repo root is read too):
+#   JEVLOAN_BACKEND, JEVLOAN_DB_PATH, TYPESAFE_DEFAULT_MODEL
+version: "runtime-v1"
+
+backend: sim                # sim = offline simulator (numbers are PROVISIONAL, never a GO); real = TypeSafe API (needs TYPESAFE_API_KEY)
+model: jev-latest
+
+timeout_budget_s: 2.0       # any Jev call slower than this routes the file to a human
+max_concurrency: 16
+rate_limit_rpm: 1000
+
+breaker_failure_threshold: 5    # consecutive failures before the circuit opens (human-only mode)
+breaker_cooldown_s: 30.0
+
+db_path: data/jevloan.db        # audit log + human queue (relative paths resolve against the repo root)
+book_path: data/book.jsonl
+
+usd_per_million_input_tokens: 0.042
+force_human_review: false       # kill switch: true sends every file to the human queue without calling Jev

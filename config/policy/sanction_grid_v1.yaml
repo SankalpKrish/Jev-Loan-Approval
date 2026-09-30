@@ -1,0 +1,212 @@
+# Sanction grid: what a sanction memo must respect for each product and ticket size.
+# One row per product x ticket band. Read by the synthetic data generator (memo conditions, tenure limits),
+# by the policy engine, and shown to Module E as structured data.
+#
+# Row fields
+#   product, band          the product and the human label of the ticket band
+#   min_amount_inr         exclusive lower bound of the band (rupees)
+#   max_amount_inr         inclusive upper bound of the band (null = open ended)
+#   max_tenure_months      longest tenure a memo may state
+#   min_bureau_band        lowest bureau score band a memo may rely on (state vocabulary)
+#   ntc_allowed            whether a new-to-credit applicant can be sanctioned in this row at all
+#   ntc_min_monthly_income_inr   income floor when ntc_allowed (rupees per month)
+#   max_ltv_pct            home loans only: highest loan-to-value the memo may sanction (percent)
+#   required_conditions    every listed condition must appear in the memo: `id` is stable, `text` is what the
+#                          memo says (no rupee figures, so the text can travel in a question)
+version: "grid-v1"
+description: >
+  Synthetic sanction grid for the Jev loan appraisal support system. Illustrative policy, not any real bank's.
+  Home-loan LTV limits follow the RBI ceilings (90/80/75 percent by ticket) tightened to the bank's own 80
+  percent maximum.
+
+bureau_band_vocabulary: ["NTC", "<600", "600-649", "650-699", "700-749", "750-799", "800+"]
+
+rows:
+  # ---------------------------------------------------------------- personal_loan_unsecured
+  - product: personal_loan_unsecured
+    band: "<=5L"
+    min_amount_inr: 0
+    max_amount_inr: 500000
+    max_tenure_months: 48
+    min_bureau_band: "650-699"
+    ntc_allowed: true
+    ntc_min_monthly_income_inr: 50000
+    max_ltv_pct: null
+    required_conditions:
+      - {id: nach_mandate, text: "Auto-debit (NACH) mandate for the EMI from the salary account"}
+      - {id: kyc_complete, text: "KYC (PAN and address proof) verified before disbursal"}
+  - product: personal_loan_unsecured
+    band: "5-10L"
+    min_amount_inr: 500000
+    max_amount_inr: 1000000
+    max_tenure_months: 60
+    min_bureau_band: "650-699"
+    ntc_allowed: true
+    ntc_min_monthly_income_inr: 50000
+    max_ltv_pct: null
+    required_conditions:
+      - {id: nach_mandate, text: "Auto-debit (NACH) mandate for the EMI from the salary account"}
+      - {id: kyc_complete, text: "KYC (PAN and address proof) verified before disbursal"}
+      - {id: employer_verification, text: "Employment verified directly with the employer before disbursal"}
+  - product: personal_loan_unsecured
+    band: "10-25L"
+    min_amount_inr: 1000000
+    max_amount_inr: 2500000
+    max_tenure_months: 60
+    min_bureau_band: "650-699"
+    ntc_allowed: true
+    ntc_min_monthly_income_inr: 50000
+    max_ltv_pct: null
+    required_conditions:
+      - {id: nach_mandate, text: "Auto-debit (NACH) mandate for the EMI from the salary account"}
+      - {id: kyc_complete, text: "KYC (PAN and address proof) verified before disbursal"}
+      - {id: employer_verification, text: "Employment verified directly with the employer before disbursal"}
+      - {id: guarantor, text: "Guarantor with satisfactory bureau standing (unsecured loans above 10 lakh)"}
+  - product: personal_loan_unsecured
+    band: "25-40L"
+    min_amount_inr: 2500000
+    max_amount_inr: 4000000
+    max_tenure_months: 60
+    min_bureau_band: "650-699"
+    ntc_allowed: true
+    ntc_min_monthly_income_inr: 50000
+    max_ltv_pct: null
+    required_conditions:
+      - {id: nach_mandate, text: "Auto-debit (NACH) mandate for the EMI from the salary account"}
+      - {id: kyc_complete, text: "KYC (PAN and address proof) verified before disbursal"}
+      - {id: employer_verification, text: "Employment verified directly with the employer before disbursal"}
+      - {id: guarantor, text: "Guarantor with satisfactory bureau standing (unsecured loans above 10 lakh)"}
+      - {id: credit_life_insurance, text: "Credit life insurance cover for the loan amount, bank as beneficiary"}
+
+  # ---------------------------------------------------------------- business_loan_self_employed
+  - product: business_loan_self_employed
+    band: "<=10L"
+    min_amount_inr: 0
+    max_amount_inr: 1000000
+    max_tenure_months: 60
+    min_bureau_band: "650-699"
+    ntc_allowed: false
+    ntc_min_monthly_income_inr: null
+    max_ltv_pct: null
+    required_conditions:
+      - {id: nach_mandate, text: "Auto-debit (NACH) mandate for the EMI from the business current account"}
+      - {id: kyc_complete, text: "KYC (PAN and address proof) verified before disbursal"}
+      - {id: itr_gst_verification, text: "Latest ITR and GST returns verified against bank statements"}
+  - product: business_loan_self_employed
+    band: "10-50L"
+    min_amount_inr: 1000000
+    max_amount_inr: 5000000
+    max_tenure_months: 84
+    min_bureau_band: "650-699"
+    ntc_allowed: false
+    ntc_min_monthly_income_inr: null
+    max_ltv_pct: null
+    required_conditions:
+      - {id: nach_mandate, text: "Auto-debit (NACH) mandate for the EMI from the business current account"}
+      - {id: kyc_complete, text: "KYC (PAN and address proof) verified before disbursal"}
+      - {id: itr_gst_verification, text: "Latest ITR and GST returns verified against bank statements"}
+      - {id: personal_guarantee, text: "Personal guarantee of the proprietor or partners"}
+  - product: business_loan_self_employed
+    band: "50L-2Cr"
+    min_amount_inr: 5000000
+    max_amount_inr: 20000000
+    max_tenure_months: 84
+    min_bureau_band: "650-699"
+    ntc_allowed: false
+    ntc_min_monthly_income_inr: null
+    max_ltv_pct: null
+    required_conditions:
+      - {id: nach_mandate, text: "Auto-debit (NACH) mandate for the EMI from the business current account"}
+      - {id: kyc_complete, text: "KYC (PAN and address proof) verified before disbursal"}
+      - {id: itr_gst_verification, text: "Latest ITR and GST returns verified against bank statements"}
+      - {id: personal_guarantee, text: "Personal guarantee of the proprietor or partners"}
+      - {id: collateral_security, text: "Collateral security by mortgage of immovable property with full cover"}
+
+  # ---------------------------------------------------------------- msme_term_loan
+  - product: msme_term_loan
+    band: "<=50L"
+    min_amount_inr: 0
+    max_amount_inr: 5000000
+    max_tenure_months: 84
+    min_bureau_band: "650-699"
+    ntc_allowed: false
+    ntc_min_monthly_income_inr: null
+    max_ltv_pct: null
+    required_conditions:
+      - {id: udyam_registration, text: "Valid Udyam registration on file"}
+      - {id: cgtmse_cover, text: "CGTMSE guarantee cover obtained for the collateral-free loan"}
+      - {id: asset_insurance, text: "Insurance of the financed assets with the bank as loss payee"}
+  - product: msme_term_loan
+    band: "50L-2Cr"
+    min_amount_inr: 5000000
+    max_amount_inr: 20000000
+    max_tenure_months: 96
+    min_bureau_band: "650-699"
+    ntc_allowed: false
+    ntc_min_monthly_income_inr: null
+    max_ltv_pct: null
+    required_conditions:
+      - {id: udyam_registration, text: "Valid Udyam registration on file"}
+      - {id: cgtmse_cover, text: "CGTMSE guarantee cover obtained for the collateral-free loan"}
+      - {id: asset_insurance, text: "Insurance of the financed assets with the bank as loss payee"}
+      - {id: hypothecation_stock, text: "Hypothecation of stock and book debts in favour of the bank (loans above 50 lakh)"}
+      - {id: personal_guarantee, text: "Personal guarantee of the promoters"}
+  - product: msme_term_loan
+    band: "2-5Cr"
+    min_amount_inr: 20000000
+    max_amount_inr: 50000000
+    max_tenure_months: 120
+    min_bureau_band: "650-699"
+    ntc_allowed: false
+    ntc_min_monthly_income_inr: null
+    max_ltv_pct: null
+    required_conditions:
+      - {id: udyam_registration, text: "Valid Udyam registration on file"}
+      - {id: cgtmse_cover, text: "CGTMSE guarantee cover obtained for the collateral-free loan"}
+      - {id: asset_insurance, text: "Insurance of the financed assets with the bank as loss payee"}
+      - {id: hypothecation_stock, text: "Hypothecation of stock and book debts in favour of the bank (loans above 50 lakh)"}
+      - {id: personal_guarantee, text: "Personal guarantee of the promoters"}
+      - {id: escrow_receivables, text: "Escrow of business receivables with the bank"}
+
+  # ---------------------------------------------------------------- home_loan
+  - product: home_loan
+    band: "<=30L"
+    min_amount_inr: 0
+    max_amount_inr: 3000000
+    max_tenure_months: 300
+    min_bureau_band: "650-699"
+    ntc_allowed: false
+    ntc_min_monthly_income_inr: null
+    max_ltv_pct: 80
+    required_conditions:
+      - {id: property_insurance, text: "Property insurance assigned to the bank for the life of the loan"}
+      - {id: equitable_mortgage, text: "Equitable mortgage created over the property before disbursal"}
+      - {id: legal_title_opinion, text: "Positive legal opinion on title from the bank's panel advocate"}
+  - product: home_loan
+    band: "30-75L"
+    min_amount_inr: 3000000
+    max_amount_inr: 7500000
+    max_tenure_months: 360
+    min_bureau_band: "650-699"
+    ntc_allowed: false
+    ntc_min_monthly_income_inr: null
+    max_ltv_pct: 80
+    required_conditions:
+      - {id: property_insurance, text: "Property insurance assigned to the bank for the life of the loan"}
+      - {id: equitable_mortgage, text: "Equitable mortgage created over the property before disbursal"}
+      - {id: legal_title_opinion, text: "Positive legal opinion on title from the bank's panel advocate"}
+      - {id: co_applicant_income, text: "Income of the co-applicant documented where it is counted for eligibility"}
+  - product: home_loan
+    band: ">75L"
+    min_amount_inr: 7500000
+    max_amount_inr: null
+    max_tenure_months: 360
+    min_bureau_band: "650-699"
+    ntc_allowed: false
+    ntc_min_monthly_income_inr: null
+    max_ltv_pct: 75
+    required_conditions:
+      - {id: property_insurance, text: "Property insurance assigned to the bank for the life of the loan"}
+      - {id: equitable_mortgage, text: "Equitable mortgage created over the property before disbursal"}
+      - {id: legal_title_opinion, text: "Positive legal opinion on title from the bank's panel advocate"}
+      - {id: two_valuations, text: "Independent valuation by two empanelled valuers (loans above 75 lakh)"}

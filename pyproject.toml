@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jevloan"
+version = "0.1.0"
+description = "RBI-compliant loan appraisal support system built on TypeSafe's Jev model (advisory only)."
+requires-python = ">=3.14"
+dependencies = [
+    "typesafe-sdk>=0.7.2",
+    "fastapi",
+    "uvicorn",
+    "pyyaml",
+    "pydantic>=2",
+    "jinja2",
+    "python-dotenv",
+    "numpy",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+]
+
+[project.scripts]
+jevloan = "jevloan.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+jevloan = ["api/templates/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "real_jev: calls the real TypeSafe Jev API; needs TYPESAFE_API_KEY (opt-in: pytest -m real_jev)",
+    "slow: slow tests (large replays, subprocess chaos)",
+]
+addopts = "-m 'not real_jev'"

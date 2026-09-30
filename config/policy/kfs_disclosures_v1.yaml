@@ -1,0 +1,34 @@
+# Disclosures a Key Fact Statement (KFS) must carry before a loan is disbursed (RBI digital lending KFS format,
+# simplified for the synthetic book). Each is a section of the KFS text. Module E asks one question per id.
+#
+#   id        stable identifier; the question id is E_disclosure_<id> and a defect is disclosure_missing:<id>
+#   heading   the section heading as it appears in the KFS text
+#   text      what the section must state (the rubric wording for the human reader and the model)
+version: "kfs-v1"
+description: "The eight disclosures the sanction-docs stage checks a KFS for."
+
+disclosures:
+  - id: apr
+    heading: "Annual Percentage Rate (APR)"
+    text: "States the APR, the annualised rate of return that includes interest and all upfront fees."
+  - id: total_cost_of_credit
+    heading: "Total cost of credit"
+    text: "States the total amount payable over the tenure and how much of it is interest and fees."
+  - id: fees_and_charges_breakup
+    heading: "Fees and charges"
+    text: "Itemises every upfront fee and charge the borrower pays, such as processing, documentation and insurance."
+  - id: cooling_off_period
+    heading: "Cooling-off period"
+    text: "States that the borrower may exit the loan within the cooling-off period by repaying principal and pro-rata interest."
+  - id: grievance_redressal_officer
+    heading: "Grievance redressal officer"
+    text: "Names the grievance redressal officer with a contact number and email, and the escalation route."
+  - id: recovery_agent_policy
+    heading: "Recovery agent policy"
+    text: "States how recovery agents are appointed, how they must behave, and how the borrower is told of them."
+  - id: repayment_schedule
+    heading: "Repayment schedule"
+    text: "States the number of instalments, the EMI, the due day and that a full schedule is provided."
+  - id: penal_charges
+    heading: "Penal charges"
+    text: "States the penal charge for late or missed payment and that it is not compounded."

@@ -12,6 +12,7 @@
 | Policy version | {{policy_version}} |
 | Pricing version | {{pricing_version}} |
 | Book | {{book_n}} files, generator {{generator_version}}, seed {{seed}} |
+| Split | {{split}}: headline numbers come from the holdout (80%), and policy was tuned only on dev (20%) |
 | Pre-registration | {{prereg_version}} |
 
 ## 1. Recommendation

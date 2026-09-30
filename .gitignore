@@ -3,10 +3,11 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
-data/
+/data/
 *.db
 *.sqlite
 *.sqlite3
 reports/runs/
 .coverage
 htmlcov/
+*.egg-info/
